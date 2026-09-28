@@ -1,28 +1,42 @@
 package com.ianalapshina.petclinic;
 
+import com.ianalapshina.petclinic.dto.ErrorResponse;
 import com.ianalapshina.petclinic.generator.OwnerGenerator;
 import com.ianalapshina.petclinic.model.Owner;
 import com.ianalapshina.petclinic.stepdefs.OwnerSteps;
-import io.restassured.response.Response;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.AfterEach;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.ianalapshina.petclinic.dto.OwnerResponse;
+import java.util.HashSet;
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 public class OwnerCrudTest extends BaseApiTest {
 
-    private final OwnerSteps ownerSteps = new OwnerSteps();
-    private Integer createdOwnerId;
+    @Autowired
+    private OwnerSteps ownerSteps;
+    private final Set<Integer> createdOwnerIds = new HashSet<>();
+
+    private OwnerResponse createOwnerAndTrack(Owner owner) {
+        OwnerResponse createdOwner = ownerSteps.createOwner(owner);
+        createdOwnerIds.add(createdOwner.id());
+        return createdOwner;
+    }
 
     @AfterEach
     void cleanUp() {
-        if (createdOwnerId != null) {
-            ownerSteps.deleteOwner(createdOwnerId);
+        for (Integer ownerId : createdOwnerIds) {
+            ownerSteps.deleteOwnerIfExists(ownerId);
         }
+
+        createdOwnerIds.clear();
     }
 
     @Test
@@ -31,51 +45,45 @@ public class OwnerCrudTest extends BaseApiTest {
 
         Owner owner = OwnerGenerator.validOwner();
 
-        Response createResponse = ownerSteps.createOwner(owner);
+        OwnerResponse createdOwner = createOwnerAndTrack(owner);
+        Integer createdOwnerId = createdOwner.id();
+
         assertAll("Проверка создания владельца",
-                () -> assertEquals(201, createResponse.statusCode()),
-                () -> assertNotNull(createResponse.jsonPath().get("id")),
-                () -> assertEquals(owner.firstName(), createResponse.jsonPath().getString("firstName")),
-                () -> assertEquals(owner.lastName(), createResponse.jsonPath().getString("lastName")),
-                () -> assertEquals(owner.address(), createResponse.jsonPath().getString("address")),
-                () -> assertEquals(owner.city(), createResponse.jsonPath().getString("city")),
-                () -> assertEquals(owner.telephone(), createResponse.jsonPath().getString("telephone"))
+                () -> assertNotNull(createdOwner.id()),
+                () -> assertEquals(owner.firstName(), createdOwner.firstName()),
+                () -> assertEquals(owner.lastName(), createdOwner.lastName())
         );
 
-        createdOwnerId = createResponse.jsonPath().getInt("id");
+        OwnerResponse receivedOwner = ownerSteps.getOwner(createdOwnerId);
 
-        Response getResponse = ownerSteps.getOwner(createdOwnerId);
-        assertAll("Проверка созданного владельца",
-                () -> assertEquals(200, getResponse.statusCode()),
-                () -> assertEquals(createdOwnerId, getResponse.jsonPath().getInt("id")),
-                () -> assertEquals(owner.firstName(), getResponse.jsonPath().getString("firstName")),
-                () -> assertEquals(owner.lastName(), getResponse.jsonPath().getString("lastName")),
-                () -> assertEquals(owner.address(), getResponse.jsonPath().getString("address")),
-                () -> assertEquals(owner.city(), getResponse.jsonPath().getString("city")),
-                () -> assertEquals(owner.telephone(), getResponse.jsonPath().getString("telephone"))
+        assertAll("Проверка получения владельца",
+                () -> assertEquals(createdOwnerId, receivedOwner.id()),
+                () -> assertEquals(owner.firstName(), receivedOwner.firstName()),
+                () -> assertEquals(owner.lastName(), receivedOwner.lastName()),
+                () -> assertEquals(owner.address(), receivedOwner.address()),
+                () -> assertEquals(owner.city(), receivedOwner.city()),
+                () -> assertEquals(owner.telephone(), receivedOwner.telephone())
         );
 
         Owner updatedOwner = OwnerGenerator.updatedOwner();
 
-        Response updateResponse = ownerSteps.updateOwner(createdOwnerId, updatedOwner);
-        assertEquals(204, updateResponse.statusCode());
+        ownerSteps.updateOwner(createdOwnerId, updatedOwner);
 
-        Response updatedResponse = ownerSteps.getOwner(createdOwnerId);
+        OwnerResponse updatedResponse = ownerSteps.getOwner(createdOwnerId);
+
         assertAll("Проверка данных после обновления владельца",
-                () -> assertEquals(200, updatedResponse.statusCode()),
-                () -> assertEquals(createdOwnerId, updatedResponse.jsonPath().getInt("id")),
-                () -> assertEquals(updatedOwner.firstName(), updatedResponse.jsonPath().getString("firstName")),
-                () -> assertEquals(updatedOwner.lastName(), updatedResponse.jsonPath().getString("lastName")),
-                () -> assertEquals(updatedOwner.address(), updatedResponse.jsonPath().getString("address")),
-                () -> assertEquals(updatedOwner.city(), updatedResponse.jsonPath().getString("city")),
-                () -> assertEquals(updatedOwner.telephone(), updatedResponse.jsonPath().getString("telephone"))
+                () -> assertEquals(createdOwnerId, updatedResponse.id()),
+                () -> assertEquals(updatedOwner.firstName(), updatedResponse.firstName()),
+                () -> assertEquals(updatedOwner.lastName(), updatedResponse.lastName()),
+                () -> assertEquals(updatedOwner.address(), updatedResponse.address()),
+                () -> assertEquals(updatedOwner.city(), updatedResponse.city()),
+                () -> assertEquals(updatedOwner.telephone(), updatedResponse.telephone())
         );
 
-        Response deleteResponse = ownerSteps.deleteOwner(createdOwnerId);
-        assertEquals(204, deleteResponse.statusCode());
+        ownerSteps.deleteOwner(createdOwnerId);
+        createdOwnerIds.remove(createdOwnerId);
 
-        Response deletedOwnerResponse = ownerSteps.getOwner(createdOwnerId);
-        assertEquals(404, deletedOwnerResponse.statusCode());
+        ownerSteps.getNonExistingOwner(createdOwnerId);
     }
 
     @Test
@@ -83,12 +91,12 @@ public class OwnerCrudTest extends BaseApiTest {
     void createInvalidOwner() {
         Owner invalidOwner = OwnerGenerator.invalidOwner();
 
-        Response response = ownerSteps.createOwner(invalidOwner);
-        assertAll("Проверка ошибки валидации при создании владельца",
-                () -> assertEquals(400, response.statusCode()),
-                () -> assertEquals(400, response.jsonPath().getInt("status")),
-                () -> assertEquals("The request contains invalid or missing parameters", response.jsonPath().getString("detail")),
-                () -> assertNotNull(response.jsonPath().get("schemaValidationErrors"))
+        ErrorResponse error = ownerSteps.createInvalidOwner(invalidOwner);
+
+        assertAll("Проверка ошибки валидации",
+                () -> assertEquals(400, error.status()),
+                () -> assertEquals("The request contains invalid or missing parameters", error.detail()),
+                () -> assertNotNull(error.schemaValidationErrors())
         );
     }
 
@@ -97,8 +105,7 @@ public class OwnerCrudTest extends BaseApiTest {
     void getNonExistingOwner() {
         int ownerId = 999999;
 
-        Response response = ownerSteps.getOwner(ownerId);
-        assertEquals(404, response.statusCode());
+        ownerSteps.getNonExistingOwner(ownerId);
     }
 
     @Test
@@ -106,17 +113,17 @@ public class OwnerCrudTest extends BaseApiTest {
     void updateOwnerWithInvalidData() {
         Owner owner = OwnerGenerator.validOwner();
 
-        Response createResponse = ownerSteps.createOwner(owner);
-        createdOwnerId = createResponse.jsonPath().getInt("id");
+        OwnerResponse createdOwner = createOwnerAndTrack(owner);
+        Integer createdOwnerId = createdOwner.id();
 
         Owner invalidOwner = OwnerGenerator.invalidOwner();
 
-        Response updateResponse = ownerSteps.updateOwner(createdOwnerId, invalidOwner);
+        ErrorResponse error = ownerSteps.updateOwnerWithInvalidData(createdOwnerId, invalidOwner);
+
         assertAll("Проверка ошибки валидации при обновлении владельца",
-                () -> assertEquals(400, updateResponse.statusCode()),
-                () -> assertEquals(400, updateResponse.jsonPath().getInt("status")),
-                () -> assertEquals("The request contains invalid or missing parameters", updateResponse.jsonPath().getString("detail")),
-                () -> assertNotNull(updateResponse.jsonPath().get("schemaValidationErrors"))
+                () -> assertEquals(400, error.status()),
+                () -> assertEquals("The request contains invalid or missing parameters", error.detail()),
+                () -> assertNotNull(error.schemaValidationErrors())
         );
     }
 
@@ -132,12 +139,11 @@ public class OwnerCrudTest extends BaseApiTest {
                 telephone
         );
 
-        Response response = ownerSteps.createOwner(owner);
+        ErrorResponse error = ownerSteps.createInvalidOwner(owner);
         assertAll("Проверка валидации телефона",
-                () -> assertEquals(400, response.statusCode()),
-                () -> assertEquals(400, response.jsonPath().getInt("status")),
-                () -> assertEquals("The request contains invalid or missing parameters", response.jsonPath().getString("detail")),
-                () -> assertNotNull(response.jsonPath().get("schemaValidationErrors"))
+                () -> assertEquals(400, error.status()),
+                () -> assertEquals("The request contains invalid or missing parameters", error.detail()),
+                () -> assertNotNull(error.schemaValidationErrors())
         );
     }
 }
